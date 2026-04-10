@@ -92,6 +92,18 @@ Partial Class MainForm
     Private currentProjectPath As String = ""
     Private formBgColor As Color = Color.FromArgb(245, 245, 240)
 
+    ' Clipboard
+    Private clipboardItems As New List(Of WidgetData)
+
+    ' Zoom
+    Private zoomFactor As Single = 1.0F
+    Private Const ZOOM_MIN As Single = 0.5F
+    Private Const ZOOM_MAX As Single = 3.0F
+
+    ' Undo/Redo
+    Private undoStack As New Stack(Of String)
+    Private redoStack As New Stack(Of String)
+
     ' =============================================
     ' --- التهيئة ---
     ' =============================================
@@ -409,6 +421,7 @@ Partial Class MainForm
         AddHandler ctrl.MouseMove, AddressOf Widget_MouseMove
         AddHandler ctrl.MouseUp, AddressOf Widget_MouseUp
 
+        SaveUndoState()
         DesignPanel.Controls.Add(ctrl)
         ctrl.BringToFront()
 
@@ -591,6 +604,7 @@ Partial Class MainForm
     End Sub
 
     Private Sub Widget_MouseUp(sender As Object, e As MouseEventArgs)
+        If isDragging OrElse isResizing Then SaveUndoState()
         isDragging = False : isResizing = False
         activeHandle = ResizeHandle.None
         DesignPanel.Capture = False
@@ -1074,21 +1088,322 @@ Partial Class MainForm
 
     Protected Overrides Function ProcessCmdKey(ByRef msg As Message, keyData As Keys) As Boolean
         If keyData = Keys.Delete AndAlso selectedControls.Count > 0 Then
-            BtnDelete_Click(Nothing, Nothing) : Return True
+            SaveUndoState()
+            BtnDelete_Click(Nothing, Nothing)
+            Return True
         End If
         If keyData = (Keys.Control Or Keys.A) Then
             selectedControls.Clear()
             For Each ctrl As Control In DesignPanel.Controls
-                selectedControls.Add(ctrl) : selectedControl = ctrl
+                selectedControls.Add(ctrl)
+                selectedControl = ctrl
             Next
             If selectedControls.Count > 0 Then
                 LblSelectedType.Text = "محدد: " & selectedControls.Count & " عناصر"
                 ClearPropertyFields()
             End If
-            UpdateAlignButtons() : DesignPanel.Invalidate() : Return True
+            UpdateAlignButtons()
+            DesignPanel.Invalidate()
+            Return True
+        End If
+        If keyData = (Keys.Control Or Keys.C) AndAlso selectedControls.Count > 0 Then
+            CopySelectedControls()
+            Return True
+        End If
+        If keyData = (Keys.Control Or Keys.V) AndAlso clipboardItems.Count > 0 Then
+            SaveUndoState()
+            PasteControls()
+            Return True
+        End If
+        If keyData = (Keys.Control Or Keys.Z) Then
+            PerformUndo()
+            Return True
+        End If
+        If keyData = (Keys.Control Or Keys.Y) Then
+            PerformRedo()
+            Return True
+        End If
+        If keyData = (Keys.Control Or Keys.Oemplus) OrElse keyData = (Keys.Control Or Keys.Add) Then
+            ZoomIn()
+            Return True
+        End If
+        If keyData = (Keys.Control Or Keys.OemMinus) OrElse keyData = (Keys.Control Or Keys.Subtract) Then
+            ZoomOut()
+            Return True
+        End If
+        If keyData = (Keys.Control Or Keys.D0) OrElse keyData = (Keys.Control Or Keys.NumPad0) Then
+            ZoomReset()
+            Return True
         End If
         Return MyBase.ProcessCmdKey(msg, keyData)
     End Function
+
+
+    ' =============================================
+    ' --- نسخ ولصق ---
+    ' =============================================
+
+    Private Sub CopySelectedControls()
+        clipboardItems.Clear()
+        For Each ctrl As Control In selectedControls
+            Dim n As String = ctrl.Name
+            Dim wd As New WidgetData()
+            wd.WidgetType = If(ctrl.Tag IsNot Nothing, ctrl.Tag.ToString(), "")
+            wd.Name = n
+            wd.Text = ctrl.Text
+            wd.X = ctrl.Left : wd.Y = ctrl.Top
+            wd.W = ctrl.Width : wd.H = ctrl.Height
+            wd.FgColor = ColorToHex(ctrl.ForeColor)
+            wd.BgColor = ColorToHex(ctrl.BackColor)
+            wd.FontName = ctrl.Font.Name
+            wd.FontSize = CInt(ctrl.Font.Size)
+            wd.FontBold = ctrl.Font.Bold
+            wd.Relief = If(widgetRelief.ContainsKey(n), widgetRelief(n), "flat")
+            wd.CommandName = If(widgetCommand.ContainsKey(n), widgetCommand(n), "")
+            wd.LayoutMode = If(widgetLayout.ContainsKey(n), widgetLayout(n), "place")
+            wd.PackSide = If(widgetPackSide.ContainsKey(n), widgetPackSide(n), "top")
+            wd.PackFill = If(widgetPackFill.ContainsKey(n), widgetPackFill(n), "none")
+            wd.PackExpand = If(widgetPackExpand.ContainsKey(n), widgetPackExpand(n), False)
+            wd.GridRow = If(widgetGridRow.ContainsKey(n), widgetGridRow(n), 0)
+            wd.GridCol = If(widgetGridCol.ContainsKey(n), widgetGridCol(n), 0)
+            wd.GridSticky = If(widgetGridSticky.ContainsKey(n), widgetGridSticky(n), "")
+            wd.ParentFrame = If(widgetParent.ContainsKey(n), widgetParent(n), "root")
+            wd.ImagePath = If(widgetImage.ContainsKey(n), widgetImage(n), "")
+            clipboardItems.Add(wd)
+        Next
+        UpdateStatusBar("تم نسخ " & clipboardItems.Count & " عنصر — Ctrl+V للصق")
+    End Sub
+
+    Private Sub PasteControls()
+        Dim offset As Integer = 16
+        selectedControls.Clear()
+        selectedControl = Nothing
+        For Each wd As WidgetData In clipboardItems
+            If Not controlCounters.ContainsKey(wd.WidgetType) Then
+                controlCounters(wd.WidgetType) = 0
+            End If
+            Dim newWd As New WidgetData()
+            newWd.WidgetType = wd.WidgetType
+            newWd.Text = wd.Text
+            newWd.X = Math.Min(wd.X + offset, DesignPanel.Width - wd.W)
+            newWd.Y = Math.Min(wd.Y + offset, DesignPanel.Height - wd.H)
+            newWd.W = wd.W : newWd.H = wd.H
+            newWd.FgColor = wd.FgColor : newWd.BgColor = wd.BgColor
+            newWd.FontName = wd.FontName : newWd.FontSize = wd.FontSize
+            newWd.FontBold = wd.FontBold : newWd.Relief = wd.Relief
+            newWd.CommandName = wd.CommandName : newWd.LayoutMode = wd.LayoutMode
+            newWd.PackSide = wd.PackSide : newWd.PackFill = wd.PackFill
+            newWd.PackExpand = wd.PackExpand : newWd.GridRow = wd.GridRow
+            newWd.GridCol = wd.GridCol : newWd.GridSticky = wd.GridSticky
+            newWd.ParentFrame = wd.ParentFrame : newWd.ImagePath = wd.ImagePath
+            ' Name يُولد داخل AddWidgetToCanvas
+            newWd.Name = ""
+            controlCounters(wd.WidgetType) -= 1
+            If newWd.WidgetType = "Image" Then
+                AddImageWidget(New Point(newWd.X, newWd.Y), newWd)
+            Else
+                AddWidgetToCanvas(newWd.WidgetType, New Point(newWd.X, newWd.Y), newWd)
+            End If
+            If DesignPanel.Controls.Count > 0 Then
+                Dim pasted As Control = DesignPanel.Controls(DesignPanel.Controls.Count - 1)
+                If Not selectedControls.Contains(pasted) Then
+                    selectedControls.Add(pasted)
+                    selectedControl = pasted
+                End If
+            End If
+        Next
+        LblSelectedType.Text = "محدد: " & selectedControls.Count & " عناصر ملصقة"
+        UpdateAlignButtons()
+        DesignPanel.Invalidate()
+        UpdateCodePreview()
+        UpdateStatusBar("تم لصق " & clipboardItems.Count & " عنصر")
+    End Sub
+
+    ' =============================================
+    ' --- Undo / Redo ---
+    ' =============================================
+
+    Private Sub SaveUndoState()
+        undoStack.Push(SerializeCurrentState())
+        redoStack.Clear()
+        UpdateUndoRedoButtons()
+    End Sub
+
+    Private Sub PerformUndo()
+        If undoStack.Count = 0 Then
+            UpdateStatusBar("لا يوجد ما يمكن التراجع عنه")
+            Return
+        End If
+        redoStack.Push(SerializeCurrentState())
+        RestoreState(undoStack.Pop())
+        UpdateUndoRedoButtons()
+        UpdateStatusBar("تم التراجع | Ctrl+Y للإعادة")
+    End Sub
+
+    Private Sub PerformRedo()
+        If redoStack.Count = 0 Then
+            UpdateStatusBar("لا يوجد ما يمكن إعادته")
+            Return
+        End If
+        undoStack.Push(SerializeCurrentState())
+        RestoreState(redoStack.Pop())
+        UpdateUndoRedoButtons()
+        UpdateStatusBar("تم الإعادة")
+    End Sub
+
+    Private Sub UpdateUndoRedoButtons()
+        BtnUndo.Enabled = undoStack.Count > 0
+        BtnRedo.Enabled = redoStack.Count > 0
+        BtnUndo.ToolTipText = "تراجع (" & undoStack.Count & ") Ctrl+Z"
+        BtnRedo.ToolTipText = "إعادة (" & redoStack.Count & ") Ctrl+Y"
+    End Sub
+
+    Private Function SerializeCurrentState() As String
+        Dim sb As New StringBuilder()
+        sb.Append("{""w"":[")
+        Dim ctrls As New List(Of Control)()
+        For Each c As Control In DesignPanel.Controls
+            ctrls.Add(c)
+        Next
+        For i As Integer = 0 To ctrls.Count - 1
+            Dim ctrl As Control = ctrls(i)
+            Dim n As String = ctrl.Name
+            Dim wt As String = If(ctrl.Tag IsNot Nothing, ctrl.Tag.ToString(), "")
+            If i > 0 Then sb.Append(",")
+            sb.Append("{")
+            sb.Append(Chr(34) & "t" & Chr(34) & ":" & Chr(34) & EscapeJson(wt) & Chr(34) & ",")
+            sb.Append(Chr(34) & "n" & Chr(34) & ":" & Chr(34) & EscapeJson(n) & Chr(34) & ",")
+            sb.Append(Chr(34) & "x" & Chr(34) & ":" & Chr(34) & EscapeJson(ctrl.Text) & Chr(34) & ",")
+            sb.Append(Chr(34) & "l" & Chr(34) & ":" & ctrl.Left & ",")
+            sb.Append(Chr(34) & "p" & Chr(34) & ":" & ctrl.Top & ",")
+            sb.Append(Chr(34) & "ww" & Chr(34) & ":" & ctrl.Width & ",")
+            sb.Append(Chr(34) & "hh" & Chr(34) & ":" & ctrl.Height & ",")
+            sb.Append(Chr(34) & "fg" & Chr(34) & ":" & Chr(34) & ColorToHex(ctrl.ForeColor) & Chr(34) & ",")
+            sb.Append(Chr(34) & "bg" & Chr(34) & ":" & Chr(34) & ColorToHex(ctrl.BackColor) & Chr(34) & ",")
+            sb.Append(Chr(34) & "fn" & Chr(34) & ":" & Chr(34) & EscapeJson(ctrl.Font.Name) & Chr(34) & ",")
+            sb.Append(Chr(34) & "fs" & Chr(34) & ":" & CInt(ctrl.Font.Size) & ",")
+            sb.Append(Chr(34) & "fb" & Chr(34) & ":" & If(ctrl.Font.Bold, "true", "false") & ",")
+            sb.Append(Chr(34) & "r" & Chr(34) & ":" & Chr(34) & EscapeJson(If(widgetRelief.ContainsKey(n), widgetRelief(n), "flat")) & Chr(34) & ",")
+            sb.Append(Chr(34) & "cm" & Chr(34) & ":" & Chr(34) & EscapeJson(If(widgetCommand.ContainsKey(n), widgetCommand(n), "")) & Chr(34) & ",")
+            sb.Append(Chr(34) & "lm" & Chr(34) & ":" & Chr(34) & EscapeJson(If(widgetLayout.ContainsKey(n), widgetLayout(n), "place")) & Chr(34) & ",")
+            sb.Append(Chr(34) & "ps" & Chr(34) & ":" & Chr(34) & EscapeJson(If(widgetPackSide.ContainsKey(n), widgetPackSide(n), "top")) & Chr(34) & ",")
+            sb.Append(Chr(34) & "pf" & Chr(34) & ":" & Chr(34) & EscapeJson(If(widgetPackFill.ContainsKey(n), widgetPackFill(n), "none")) & Chr(34) & ",")
+            sb.Append(Chr(34) & "pe" & Chr(34) & ":" & If(widgetPackExpand.ContainsKey(n) AndAlso widgetPackExpand(n), "true", "false") & ",")
+            sb.Append(Chr(34) & "gr" & Chr(34) & ":" & If(widgetGridRow.ContainsKey(n), widgetGridRow(n), 0) & ",")
+            sb.Append(Chr(34) & "gc" & Chr(34) & ":" & If(widgetGridCol.ContainsKey(n), widgetGridCol(n), 0) & ",")
+            sb.Append(Chr(34) & "gs" & Chr(34) & ":" & Chr(34) & EscapeJson(If(widgetGridSticky.ContainsKey(n), widgetGridSticky(n), "")) & Chr(34) & ",")
+            sb.Append(Chr(34) & "par" & Chr(34) & ":" & Chr(34) & EscapeJson(If(widgetParent.ContainsKey(n), widgetParent(n), "root")) & Chr(34) & ",")
+            sb.Append(Chr(34) & "img" & Chr(34) & ":" & Chr(34) & EscapeJson(If(widgetImage.ContainsKey(n), widgetImage(n), "")) & Chr(34))
+            sb.Append("}")
+        Next
+        sb.Append("]}")
+        Return sb.ToString()
+    End Function
+
+    Private Sub RestoreState(json As String)
+        DesignPanel.Controls.Clear()
+        controlCounters.Clear()
+        widgetFgColor.Clear() : widgetBgColor.Clear() : widgetRelief.Clear()
+        widgetCommand.Clear() : widgetLayout.Clear() : widgetPackSide.Clear()
+        widgetPackFill.Clear() : widgetPackExpand.Clear() : widgetGridRow.Clear()
+        widgetGridCol.Clear() : widgetGridSticky.Clear() : widgetParent.Clear()
+        widgetImage.Clear()
+        For Each block As String In SplitJsonObjects(ExtractJsonArray(json, "w"))
+            Dim wd As New WidgetData()
+            wd.WidgetType = ParseJsonString(block, "t")
+            wd.Name = ParseJsonString(block, "n")
+            wd.Text = ParseJsonString(block, "x")
+            wd.X = ParseJsonInt(block, "l", 0)
+            wd.Y = ParseJsonInt(block, "p", 0)
+            wd.W = ParseJsonInt(block, "ww", 100)
+            wd.H = ParseJsonInt(block, "hh", 28)
+            wd.FgColor = ParseJsonString(block, "fg")
+            wd.BgColor = ParseJsonString(block, "bg")
+            wd.FontName = ParseJsonString(block, "fn")
+            wd.FontSize = ParseJsonInt(block, "fs", 9)
+            wd.FontBold = ParseJsonBool(block, "fb")
+            wd.Relief = ParseJsonString(block, "r")
+            wd.CommandName = ParseJsonString(block, "cm")
+            wd.LayoutMode = ParseJsonString(block, "lm")
+            wd.PackSide = ParseJsonString(block, "ps")
+            wd.PackFill = ParseJsonString(block, "pf")
+            wd.PackExpand = ParseJsonBool(block, "pe")
+            wd.GridRow = ParseJsonInt(block, "gr", 0)
+            wd.GridCol = ParseJsonInt(block, "gc", 0)
+            wd.GridSticky = ParseJsonString(block, "gs")
+            wd.ParentFrame = ParseJsonString(block, "par")
+            wd.ImagePath = ParseJsonString(block, "img")
+            If wd.WidgetType <> "" Then
+                If Not controlCounters.ContainsKey(wd.WidgetType) Then
+                    controlCounters(wd.WidgetType) = 0
+                End If
+                controlCounters(wd.WidgetType) -= 1
+                If wd.WidgetType = "Image" Then
+                    AddImageWidget(New Point(wd.X, wd.Y), wd)
+                Else
+                    AddWidgetToCanvas(wd.WidgetType, New Point(wd.X, wd.Y), wd)
+                End If
+            End If
+        Next
+        SelectSingle(Nothing)
+        UpdateParentFrameCombo()
+        UpdateCodePreview()
+        DesignPanel.Invalidate()
+    End Sub
+
+    ' =============================================
+    ' --- Zoom ---
+    ' =============================================
+
+    Private Sub ZoomIn()
+        If zoomFactor < ZOOM_MAX Then
+            zoomFactor = Math.Min(ZOOM_MAX, zoomFactor + 0.25F)
+            ApplyZoom()
+        End If
+    End Sub
+
+    Private Sub ZoomOut()
+        If zoomFactor > ZOOM_MIN Then
+            zoomFactor = Math.Max(ZOOM_MIN, zoomFactor - 0.25F)
+            ApplyZoom()
+        End If
+    End Sub
+
+    Private Sub ZoomReset()
+        zoomFactor = 1.0F
+        ApplyZoom()
+    End Sub
+
+    Private Sub ApplyZoom()
+        Dim baseW As Integer = 600
+        Dim baseH As Integer = 500
+        Integer.TryParse(TxtFormWidth.Text, baseW)
+        Integer.TryParse(TxtFormHeight.Text, baseH)
+        DesignPanel.Size = New Size(CInt(baseW * zoomFactor), CInt(baseH * zoomFactor))
+        LblZoom.Text = CInt(zoomFactor * 100) & "%"
+        DesignPanel.Invalidate()
+        UpdateStatusBar("تكبير: " & CInt(zoomFactor * 100) & "% | Ctrl+[+/-/0]")
+    End Sub
+
+    Private Sub BtnZoomIn_Click(sender As Object, e As EventArgs) Handles BtnZoomIn.Click
+        ZoomIn()
+    End Sub
+
+    Private Sub BtnZoomOut_Click(sender As Object, e As EventArgs) Handles BtnZoomOut.Click
+        ZoomOut()
+    End Sub
+
+    Private Sub BtnZoomReset_Click(sender As Object, e As EventArgs) Handles BtnZoomReset.Click
+        ZoomReset()
+    End Sub
+
+    Private Sub BtnUndo_Click(sender As Object, e As EventArgs) Handles BtnUndo.Click
+        PerformUndo()
+    End Sub
+
+    Private Sub BtnRedo_Click(sender As Object, e As EventArgs) Handles BtnRedo.Click
+        PerformRedo()
+    End Sub
 
     ' =============================================
     ' --- توليد كود بايثون (OOP + place/pack/grid + Frame + Image) ---

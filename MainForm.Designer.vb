@@ -45,6 +45,16 @@ Partial Class MainForm
     Private WithEvents TsSepAlign3 As System.Windows.Forms.ToolStripSeparator
     Private WithEvents BtnEqualSpaceH As System.Windows.Forms.ToolStripButton
     Private WithEvents BtnEqualSpaceV As System.Windows.Forms.ToolStripButton
+    ' Undo/Redo
+    Private WithEvents TsSepUndo As System.Windows.Forms.ToolStripSeparator
+    Private WithEvents BtnUndo As System.Windows.Forms.ToolStripButton
+    Private WithEvents BtnRedo As System.Windows.Forms.ToolStripButton
+    ' Zoom
+    Private WithEvents TsSepZoom As System.Windows.Forms.ToolStripSeparator
+    Private WithEvents BtnZoomOut As System.Windows.Forms.ToolStripButton
+    Private WithEvents LblZoom As System.Windows.Forms.ToolStripLabel
+    Private WithEvents BtnZoomIn As System.Windows.Forms.ToolStripButton
+    Private WithEvents BtnZoomReset As System.Windows.Forms.ToolStripButton
 
     Private WithEvents MainSplitter As System.Windows.Forms.SplitContainer
     Private WithEvents RightSplitter As System.Windows.Forms.SplitContainer
@@ -193,6 +203,14 @@ Partial Class MainForm
         Me.TsSepAlign3 = New System.Windows.Forms.ToolStripSeparator()
         Me.BtnEqualSpaceH = New System.Windows.Forms.ToolStripButton()
         Me.BtnEqualSpaceV = New System.Windows.Forms.ToolStripButton()
+        Me.TsSepUndo = New System.Windows.Forms.ToolStripSeparator()
+        Me.BtnUndo = New System.Windows.Forms.ToolStripButton()
+        Me.BtnRedo = New System.Windows.Forms.ToolStripButton()
+        Me.TsSepZoom = New System.Windows.Forms.ToolStripSeparator()
+        Me.BtnZoomOut = New System.Windows.Forms.ToolStripButton()
+        Me.LblZoom = New System.Windows.Forms.ToolStripLabel()
+        Me.BtnZoomIn = New System.Windows.Forms.ToolStripButton()
+        Me.BtnZoomReset = New System.Windows.Forms.ToolStripButton()
         Me.MainSplitter = New System.Windows.Forms.SplitContainer()
         Me.RightSplitter = New System.Windows.Forms.SplitContainer()
         Me.PanelLeft = New System.Windows.Forms.Panel()
@@ -328,7 +346,9 @@ Partial Class MainForm
             Me.TsLblAlign, Me.TsSepAlign,
             Me.BtnAlignLeft, Me.BtnAlignRight, Me.BtnAlignTop, Me.BtnAlignBottom,
             Me.TsSepAlign2, Me.BtnAlignCenterH, Me.BtnAlignCenterV,
-            Me.TsSepAlign3, Me.BtnEqualSpaceH, Me.BtnEqualSpaceV})
+            Me.TsSepAlign3, Me.BtnEqualSpaceH, Me.BtnEqualSpaceV,
+            Me.TsSepUndo, Me.BtnUndo, Me.BtnRedo,
+            Me.TsSepZoom, Me.BtnZoomOut, Me.LblZoom, Me.BtnZoomIn, Me.BtnZoomReset})
         Me.TsLblAlign.Text = "محاذاة:"
         Me.TsLblAlign.Font = New System.Drawing.Font("Tahoma", 8.0F, System.Drawing.FontStyle.Bold)
         Me.TsLblAlign.ForeColor = System.Drawing.Color.FromArgb(24, 95, 165)
@@ -340,6 +360,29 @@ Partial Class MainForm
         Me.BtnAlignCenterV.Text = "↕ عمودي" : Me.BtnAlignCenterV.Enabled = False
         Me.BtnEqualSpaceH.Text = "⇔ توزيع ↔" : Me.BtnEqualSpaceH.Enabled = False
         Me.BtnEqualSpaceV.Text = "⇕ توزيع ↕" : Me.BtnEqualSpaceV.Enabled = False
+
+        Me.BtnUndo.Text = "↩ Undo"
+        Me.BtnUndo.ToolTipText = "تراجع (Ctrl+Z)"
+        Me.BtnUndo.Enabled = False
+        Me.BtnUndo.BackColor = System.Drawing.Color.FromArgb(240, 245, 255)
+
+        Me.BtnRedo.Text = "↪ Redo"
+        Me.BtnRedo.ToolTipText = "إعادة (Ctrl+Y)"
+        Me.BtnRedo.Enabled = False
+        Me.BtnRedo.BackColor = System.Drawing.Color.FromArgb(240, 245, 255)
+
+        Me.BtnZoomOut.Text = "−"
+        Me.BtnZoomOut.ToolTipText = "تصغير (Ctrl+−)"
+
+        Me.LblZoom.Text = "100%"
+        Me.LblZoom.Font = New System.Drawing.Font("Tahoma", 8.0F, System.Drawing.FontStyle.Bold)
+        Me.LblZoom.ForeColor = System.Drawing.Color.FromArgb(24, 95, 165)
+
+        Me.BtnZoomIn.Text = "+"
+        Me.BtnZoomIn.ToolTipText = "تكبير (Ctrl++)"
+
+        Me.BtnZoomReset.Text = "1:1"
+        Me.BtnZoomReset.ToolTipText = "إعادة التكبير (Ctrl+0)"
 
         ' ======================
         ' PanelLeft
