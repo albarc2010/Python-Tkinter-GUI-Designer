@@ -352,16 +352,35 @@ Partial Class MainForm
             Case "Text"
                 ctrl = New RichTextBox() : defSize = New Size(160, 80)
             Case "Checkbutton"
-                ctrl = New CheckBox() : defText = "خيار " & idx : defSize = New Size(110, 22)
+                Dim chkPanel As New Panel()
+                chkPanel.BackColor = formBgColor
+                ctrl = chkPanel
+                defText = "خيار " & idx
+                defSize = New Size(120, 28)
             Case "Radiobutton"
-                ctrl = New RadioButton() : defText = "خيار " & idx : defSize = New Size(110, 22)
+                Dim rdPanel As New Panel()
+                rdPanel.BackColor = formBgColor
+                ctrl = rdPanel
+                defText = "خيار " & idx
+                defSize = New Size(120, 28)
             Case "Listbox"
                 ctrl = New ListBox() : defSize = New Size(120, 80)
                 DirectCast(ctrl, ListBox).Items.Add("عنصر 1")
                 DirectCast(ctrl, ListBox).Items.Add("عنصر 2")
             Case "Combobox"
-                ctrl = New ComboBox() : defText = "اختر..." : defSize = New Size(120, 24)
-                DirectCast(ctrl, ComboBox).Items.Add("عنصر 1")
+                ' نستخدم Panel مع Label داخله لمحاكاة ComboBox ويقبل أي ارتفاع
+                Dim cmbPanel As New Panel()
+                cmbPanel.BackColor = Color.White
+                DirectCast(cmbPanel, Panel).BorderStyle = BorderStyle.FixedSingle
+                Dim cmbLbl As New Label()
+                cmbLbl.Text = "اختر..."
+                cmbLbl.Dock = DockStyle.Fill
+                cmbLbl.TextAlign = ContentAlignment.MiddleLeft
+                cmbLbl.Padding = New Padding(3, 0, 20, 0)
+                cmbPanel.Controls.Add(cmbLbl)
+                ctrl = cmbPanel
+                defText = "اختر..."
+                defSize = New Size(120, 28)
             Case "Frame"
                 ctrl = New GroupBox() : defText = "إطار " & idx : defSize = New Size(180, 120)
             Case "Scale"
@@ -420,6 +439,11 @@ Partial Class MainForm
         AddHandler ctrl.MouseDown, AddressOf Widget_MouseDown
         AddHandler ctrl.MouseMove, AddressOf Widget_MouseMove
         AddHandler ctrl.MouseUp, AddressOf Widget_MouseUp
+
+        ' رسم مخصص للعناصر المستبدلة بـ Panel
+        If widgetType = "Checkbutton" OrElse widgetType = "Radiobutton" OrElse widgetType = "Combobox" Then
+            AddHandler ctrl.Paint, AddressOf CustomWidget_Paint
+        End If
 
         SaveUndoState()
         DesignPanel.Controls.Add(ctrl)
@@ -520,6 +544,11 @@ Partial Class MainForm
         Try
             Dim n As String = selectedControl.Name
             selectedControl.Text = PropTextBox.Text
+            ' إعادة رسم العناصر المخصصة عند تغيير النص
+            Dim ctrlTagA As String = If(selectedControl.Tag IsNot Nothing, selectedControl.Tag.ToString(), "")
+            If ctrlTagA = "Checkbutton" OrElse ctrlTagA = "Radiobutton" OrElse ctrlTagA = "Combobox" Then
+                selectedControl.Invalidate()
+            End If
             Dim xv, yv, wv, hv As Integer
             If Integer.TryParse(PropXBox.Text, xv) AndAlso xv >= 0 Then selectedControl.Left = xv
             If Integer.TryParse(PropYBox.Text, yv) AndAlso yv >= 0 Then selectedControl.Top = yv
@@ -767,6 +796,93 @@ Partial Class MainForm
     ' =============================================
     ' --- رسم اللوحة ---
     ' =============================================
+
+    ''' <summary>رسم مخصص لعناصر Combobox و Checkbutton و Radiobutton</summary>
+    Private Sub CustomWidget_Paint(sender As Object, e As PaintEventArgs)
+        Dim ctrl As Control = DirectCast(sender, Control)
+        Dim wType As String = If(ctrl.Tag IsNot Nothing, ctrl.Tag.ToString(), "")
+        Dim g As Graphics = e.Graphics
+        Dim r As Rectangle = ctrl.ClientRectangle
+        Dim fg As Color = ctrl.ForeColor
+        Dim bg As Color = ctrl.BackColor
+        Dim txt As String = ctrl.Text
+
+        g.Clear(bg)
+
+        Select Case wType
+            Case "Combobox"
+                ' رسم حقل النص
+                Dim textRect As New Rectangle(2, 2, r.Width - 22, r.Height - 4)
+                Using fgBrush As New SolidBrush(fg)
+                    Dim sf As New StringFormat()
+                    sf.Alignment = StringAlignment.Near
+                    sf.LineAlignment = StringAlignment.Center
+                    g.DrawString(txt, ctrl.Font, fgBrush, textRect, sf)
+                End Using
+                ' رسم زر السهم
+                Dim arrowRect As New Rectangle(r.Width - 20, 0, 20, r.Height)
+                Using arrowBg As New SolidBrush(Color.FromArgb(220, 220, 220))
+                    g.FillRectangle(arrowBg, arrowRect)
+                End Using
+                ' خط الفاصل
+                Using sepPen As New Pen(Color.FromArgb(150, 150, 150), 1)
+                    g.DrawLine(sepPen, r.Width - 21, 1, r.Width - 21, r.Height - 2)
+                End Using
+                ' رسم السهم ▼
+                Dim cx As Integer = r.Width - 10
+                Dim cy As Integer = r.Height \ 2
+                Dim arrowPts() As Point = {
+                    New Point(cx - 4, cy - 2),
+                    New Point(cx + 4, cy - 2),
+                    New Point(cx, cy + 3)
+                }
+                Using arrowBrush As New SolidBrush(Color.FromArgb(60, 60, 60))
+                    g.FillPolygon(arrowBrush, arrowPts)
+                End Using
+                ' الحدود
+                Using borderPen As New Pen(Color.FromArgb(120, 120, 120), 1)
+                    g.DrawRectangle(borderPen, 0, 0, r.Width - 1, r.Height - 1)
+                End Using
+
+            Case "Checkbutton"
+                ' رسم مربع الاختيار
+                Dim boxSize As Integer = Math.Min(14, r.Height - 4)
+                Dim boxY As Integer = (r.Height - boxSize) \ 2
+                Dim boxRect As New Rectangle(3, boxY, boxSize, boxSize)
+                Using boxBg As New SolidBrush(Color.White)
+                    g.FillRectangle(boxBg, boxRect)
+                End Using
+                Using boxPen As New Pen(Color.FromArgb(100, 100, 100), 1)
+                    g.DrawRectangle(boxPen, boxRect)
+                End Using
+                ' النص
+                Dim txtRect As New Rectangle(boxSize + 8, 0, r.Width - boxSize - 10, r.Height)
+                Using fgBrush As New SolidBrush(fg)
+                    Dim sf As New StringFormat()
+                    sf.LineAlignment = StringAlignment.Center
+                    g.DrawString(txt, ctrl.Font, fgBrush, txtRect, sf)
+                End Using
+
+            Case "Radiobutton"
+                ' رسم دائرة الراديو
+                Dim circSize As Integer = Math.Min(14, r.Height - 4)
+                Dim circY As Integer = (r.Height - circSize) \ 2
+                Dim circRect As New Rectangle(3, circY, circSize, circSize)
+                Using circBg As New SolidBrush(Color.White)
+                    g.FillEllipse(circBg, circRect)
+                End Using
+                Using circPen As New Pen(Color.FromArgb(100, 100, 100), 1)
+                    g.DrawEllipse(circPen, circRect)
+                End Using
+                ' النص
+                Dim txtRect2 As New Rectangle(circSize + 8, 0, r.Width - circSize - 10, r.Height)
+                Using fgBrush As New SolidBrush(fg)
+                    Dim sf As New StringFormat()
+                    sf.LineAlignment = StringAlignment.Center
+                    g.DrawString(txt, ctrl.Font, fgBrush, txtRect2, sf)
+                End Using
+        End Select
+    End Sub
 
     Private Sub DesignPanel_Paint(sender As Object, e As PaintEventArgs)
         Dim g As Graphics = e.Graphics
